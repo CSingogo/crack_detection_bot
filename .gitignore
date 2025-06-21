@@ -1,0 +1,9 @@
+# Python virtual environment
+venv/
+__pycache__/
+
+# Temporary video file from our app
+temp_video.mp4
+
+# Sensitive Information - NEVER commit this to a public repo
+.streamlit/secrets.toml
