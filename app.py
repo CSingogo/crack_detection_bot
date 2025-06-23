@@ -10,7 +10,6 @@ import tempfile
 import time
 
 # --- Page Configuration ---
-# This should be the first Streamlit command in your script
 st.set_page_config(
     page_title="Road Defect Detector",
     page_icon="🚧",
@@ -19,92 +18,88 @@ st.set_page_config(
 )
 
 # --- Model and OCR Loading ---
-# We cache these models to prevent reloading them every time the user interacts with the app
 @st.cache_resource
 def load_models():
     """Loads the YOLOv8 and EasyOCR models from disk."""
     yolo_model = YOLO('best.pt')
-    ocr_reader = easyocr.Reader(['en'], gpu=False) # Set gpu=True if your hosting environment has a GPU
+    ocr_reader = easyocr.Reader(['en'], gpu=False)
     return yolo_model, ocr_reader
 
 # --- Helper Functions ---
 def parse_gps_from_text(text):
-    """Parses GPS coordinates from a string using regular expressions."""
-    lat_match = re.search(r'(?:Lat|Latitude):\s*(-?\d+\.\d+)', text, re.IGNORECASE)
-    lon_match = re.search(r'(?:Lon|Longitude):\s*(-?\d+\.\d+)', text, re.IGNORECASE)
-    
-    if lat_match and lon_match:
-        lat = float(lat_match.group(1))
-        lon = float(lon_match.group(1))
-        return lat, lon
-    return None, None
+    text = text.replace(" ", "")
+    lat, lon = None, None
+    lat_match = re.search(r'([NS])(\d+\.\d+)', text, re.IGNORECASE)
+    lon_match = re.search(r'([EW])(\d+\.\d+)', text, re.IGNORECASE)
+    if lat_match:
+        direction, value = lat_match.groups()
+        lat = float(value) if direction.upper() == 'N' else -float(value)
+    if lon_match:
+        direction, value = lon_match.groups()
+        lon = float(value) if direction.upper() == 'E' else -float(value)
+    return lat, lon
 
-# --- Main Application UI and Logic ---
+# --- NEW: Session State Management ---
+# Initialize state variables if they don't exist
+if 'analysis_complete' not in st.session_state:
+    st.session_state.analysis_complete = False
+if 'results_df' not in st.session_state:
+    st.session_state.results_df = pd.DataFrame()
+
+# Function to reset the state when a new file is uploaded
+def reset_analysis():
+    st.session_state.analysis_complete = False
+    st.session_state.results_df = pd.DataFrame()
+
+# --- Main Application UI ---
 st.title("🚧 Road Defect Detection & Mapping")
 st.markdown("""
-    **Drag and drop a dashcam video below.** The app will:
-    1.  Process the video frame by frame to detect road defects.
-    2.  Extract GPS coordinates from the video frames.
-    3.  Plot the defect locations on an interactive map.
+    **Drag and drop a dashcam video below.** The app will analyze it once and display the results.
+    You can then interact with the results without re-running the analysis.
 """)
 
-# Load models with a user-friendly spinner
 with st.spinner('Loading AI models, this may take a moment...'):
     yolo_model, ocr_reader = load_models()
 
-# File Uploader UI
+# NEW: The on_change callback will run our reset_analysis function
 uploaded_file = st.file_uploader(
     "Choose a video file to analyze",
-    type=['mp4', 'mov', 'avi', 'mkv']
+    type=['mp4', 'mov', 'avi', 'mkv'],
+    on_change=reset_analysis 
 )
 
-if uploaded_file is not None:
-    # Use a temporary file to save the uploaded video for processing
+# --- Main Logic: Run analysis ONLY if a file is present and not yet analyzed ---
+if uploaded_file is not None and not st.session_state.analysis_complete:
     with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tfile:
         tfile.write(uploaded_file.read())
         video_path = tfile.name
 
-    st.success(f"Video '{uploaded_file.name}' uploaded successfully. Starting analysis...")
+    st.success(f"Video '{uploaded_file.name}' uploaded. Starting analysis...")
     
-    # --- UI Layout for Video Processing ---
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Video Analysis")
-        stframe = st.empty() # Placeholder for the video player
-    
+        stframe = st.empty()
     with col2:
         st.subheader("Detected Defect Map")
-        map_placeholder = st.empty() # Placeholder for the map
+        map_placeholder = st.empty() # We'll fill this in after the loop
 
     video = cv2.VideoCapture(video_path)
     total_frames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
     progress_bar = st.progress(0, text="Analyzing video...")
     
     defect_locations = []
-    
-    # --- The Main Processing Loop ---
-    # The YOLO model's predict function with stream=True is a generator
+
     for frame_idx, result in enumerate(yolo_model.predict(source=video_path, stream=True, device='cpu')):
-        
-        # Display the frame with bounding boxes drawn on it
-        frame_with_boxes = result.plot()
-        stframe.image(frame_with_boxes, channels="BGR", use_column_width=True)
-        
-        # Update the progress bar based on the frame number
+        stframe.image(result.plot(), channels="BGR", use_container_width=True)
         progress_text = f"Analyzing video... Frame {frame_idx + 1}/{total_frames}"
         progress_bar.progress((frame_idx + 1) / total_frames, text=progress_text)
         
-        # --- OCR Logic: run only if defects are detected ---
         if result.boxes:
             orig_frame = result.orig_img
             height, width, _ = orig_frame.shape
-            
-            # Crop the bottom-left corner of the frame to isolate GPS text
-            crop = orig_frame[int(height*0.85):height, 0:int(width*0.3)]
-            
-            # Run OCR on the cropped image
+            crop = orig_frame[int(height * 0.85):height, 0:int(width * 0.50)]
             ocr_results = ocr_reader.readtext(crop, detail=0, paragraph=True)
-            
             if ocr_results:
                 full_text = " ".join(ocr_results)
                 lat, lon = parse_gps_from_text(full_text)
@@ -113,55 +108,55 @@ if uploaded_file is not None:
 
     video.release()
     progress_bar.progress(1.0, text="Analysis Complete!")
-    time.sleep(2) # Pause to let the user see the completion message
-    progress_bar.empty() # Remove the progress bar
+    time.sleep(2)
+    progress_bar.empty()
 
-    # --- Display Final Results ---
-    st.header("✨ Analysis Results")
+    # --- NEW: Save results to session state and mark analysis as complete ---
     if defect_locations:
-        # Create and display the Folium map
-        map_center = [defect_locations[0]['latitude'], defect_locations[0]['longitude']]
+        st.session_state.results_df = pd.DataFrame(defect_locations).drop_duplicates().reset_index(drop=True)
+    st.session_state.analysis_complete = True
+    st.rerun() # Rerun the script one last time to display the final results cleanly
+
+# --- Display Final Results (This part runs on every interaction) ---
+if st.session_state.analysis_complete:
+    st.header("Analysis Results")
+    df_locations = st.session_state.results_df
+
+    if not df_locations.empty:
+        st.success(f"Found and mapped {len(df_locations)} unique defect locations!")
+
+        map_center = [df_locations['latitude'].mean(), df_locations['longitude'].mean()]
         
-        # Use Google Maps tiles if API key is available, otherwise fallback to default
         try:
             GOOGLE_MAPS_API_KEY = st.secrets["GOOGLE_MAPS_API_KEY"]
             tiles = f"https://mt1.google.com/vt/lyrs=m&x={{x}}&y={{y}}&z={{z}}&key={GOOGLE_MAPS_API_KEY}"
             attr = "Google"
         except (FileNotFoundError, KeyError):
-            st.warning("Google Maps API Key not found in secrets.toml. Using default OpenStreetMap.")
+            st.warning("Google Maps API Key not found. Using default OpenStreetMap.")
             tiles = "OpenStreetMap"
             attr = "OpenStreetMap"
 
         m = folium.Map(location=map_center, zoom_start=16, tiles=tiles, attr=attr)
         
-        for loc in defect_locations:
+        for index, loc in df_locations.iterrows():
             lat, lon = loc['latitude'], loc['longitude']
             google_maps_url = f"https://www.google.com/maps?q={lat},{lon}"
-            popup_html = f"""
-            <b>Defect Location</b><br>
-            Lat: {lat:.5f}, Lon: {lon:.5f}<br><br>
-            <a href="{google_maps_url}" target="_blank">Open in Google Maps</a>
-            """
-            iframe = folium.IFrame(popup_html, width=220, height=100)
+            popup_html = f"""<b>Defect #{index + 1}</b><br>Lat: {lat:.6f}<br>Lon: {lon:.6f}<br><br><a href="{google_maps_url}" target="_blank">Open in Google Maps</a>"""
+            iframe = folium.IFrame(popup_html, width=220, height=120)
             popup = folium.Popup(iframe, max_width=220)
             
             folium.Marker(
-                location=[lat, lon],
-                popup=popup,
-                tooltip="Click for details",
+                location=[lat, lon], popup=popup, tooltip="Click for details",
                 icon=folium.Icon(color='red', icon='exclamation-sign')
             ).add_to(m)
         
-        # Display the map in its placeholder
-        with map_placeholder:
-            st_folium(m, use_container_width=True)
-            
+        # Display map and dataframe
+        st_folium(m, use_container_width=True, height=500)
         st.subheader("List of Defect Coordinates")
-        st.dataframe(pd.DataFrame(defect_locations), use_container_width=True)
+        st.dataframe(df_locations, use_container_width=True)
 
     else:
-        st.warning("No defects with valid GPS coordinates were found in the video.")
-        map_placeholder.info("No data to display on the map.")
-
+        st.warning("Analysis complete, but no defects with valid GPS coordinates were found.")
 else:
+    # This message shows only when the app first loads
     st.info("Awaiting video upload to begin analysis.")
