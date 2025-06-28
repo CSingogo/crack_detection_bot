@@ -54,7 +54,8 @@ def reset_analysis():
 # --- Main Application UI ---
 st.title("🚧 Road Defect Detection & Mapping")
 st.markdown("""
-    **Drag and drop a dashcam video below.** The app will analyze it and display the results.
+    **Drag and drop a dashcam video below.** The app will analyze it and display the results. 
+            Map locations of the results will be shown. Click on a location to open it in google maps
    .
 """)
 
