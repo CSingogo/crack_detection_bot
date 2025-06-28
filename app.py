@@ -54,8 +54,8 @@ def reset_analysis():
 # --- Main Application UI ---
 st.title("🚧 Road Defect Detection & Mapping")
 st.markdown("""
-    **Drag and drop a dashcam video below.** The app will analyze it once and display the results.
-    You can then interact with the results without re-running the analysis.
+    **Drag and drop a dashcam video below.** The app will analyze it and display the results.
+   .
 """)
 
 with st.spinner('Loading AI models, this may take a moment...'):
