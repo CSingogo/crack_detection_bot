@@ -18,7 +18,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- Model and OCR Loading (using cache) ---
+# --- Model and OCR Loading (using cache) -
 @st.cache_resource
 def load_models():
     """Loads the YOLO model and OCR reader."""
