@@ -99,9 +99,9 @@ if uploaded_file is not None and not st.session_state.analysis_complete:
     FRAME_STRIDE = int(fps / 2) if fps > 2 else 1
     OCR_INTERVAL = int(fps * 2) if fps > 0.5 else 1
 
-    st.sidebar.info(f"Video FPS: {fps:.2f}")
-    st.sidebar.info(f"Analyzing 1 frame every {FRAME_STRIDE} frames.")
-    st.sidebar.info(f"Updating GPS every {OCR_INTERVAL} frames.")
+    # st.sidebar.info(f"Video FPS: {fps:.2f}")
+    # st.sidebar.info(f"Analyzing 1 frame every {FRAME_STRIDE} frames.")
+    # st.sidebar.info(f"Updating GPS every {OCR_INTERVAL} frames.")
 
     defect_locations = []
     last_known_gps = None
